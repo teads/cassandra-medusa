@@ -16,6 +16,8 @@
 import paramiko
 import logging
 from pssh.clients.miko import ParallelSSHClient
+
+import medusa.utils
 from medusa.storage import divide_chunks
 
 
@@ -61,7 +63,8 @@ class Orchestration(object):
                                        pkey=pkey)
             logging.debug('Batch #{i}: Running "{command}" on nodes {hosts} parallelism of {pool_size}'
                           .format(i=i, command=command, hosts=parallel_hosts, pool_size=len(parallel_hosts)))
-            output = client.run_command(command, host_args=hosts_variables, sudo=True)
+            output = client.run_command(command, host_args=hosts_variables,
+                                        sudo=medusa.utils.evaluate_boolean(self.cassandra_config.use_sudo))
             client.join(output)
 
             success = success + list(filter(lambda host_output: host_output.exit_code == 0,
