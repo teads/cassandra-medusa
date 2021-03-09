@@ -20,6 +20,7 @@ import datetime
 import traceback
 
 import medusa.config
+import medusa.utils
 from medusa.orchestration import Orchestration
 from medusa.monitoring import Monitoring
 from medusa.cassandra_utils import CqlSessionProvider, Cassandra
@@ -167,9 +168,10 @@ class BackupJob(object):
         stagger_option = '--in-stagger {}'.format(self.stagger) if self.stagger else ''
 
         # Use %s placeholders in the below command to have them replaced by pssh using per host command substitution
-        command = 'mkdir -p {work}; cd {work} && medusa-wrapper sudo medusa -vvv backup-node ' \
+        command = 'mkdir -p {work}; cd {work} && medusa-wrapper {sudo} medusa -vvv backup-node ' \
                   '--backup-name {backup_name} {stagger} --mode {mode}' \
             .format(work=self.work_dir,
+                    sudo='sudo' if medusa.utils.evaluate_boolean(self.config.cassandra.use_sudo) else '',
                     backup_name=self.backup_name,
                     stagger=stagger_option,
                     mode=self.mode)

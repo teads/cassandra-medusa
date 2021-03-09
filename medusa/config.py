@@ -37,7 +37,7 @@ CassandraConfig = collections.namedtuple(
     ['start_cmd', 'stop_cmd', 'config_file', 'cql_username', 'cql_password', 'check_running', 'is_ccm',
      'sstableloader_bin', 'nodetool_username', 'nodetool_password', 'nodetool_password_file_path', 'nodetool_host',
      'nodetool_port', 'certfile', 'usercert', 'userkey', 'sstableloader_ts', 'sstableloader_tspw',
-     'sstableloader_ks', 'sstableloader_kspw', 'nodetool_ssl', 'resolve_ip_addresses']
+     'sstableloader_ks', 'sstableloader_kspw', 'nodetool_ssl', 'resolve_ip_addresses', 'use_sudo']
 )
 
 SSHConfig = collections.namedtuple(
@@ -113,7 +113,8 @@ def load_config(args, config_file):
         'check_running': 'nodetool version',
         'is_ccm': 0,
         'sstableloader_bin': 'sstableloader',
-        'resolve_ip_addresses': True
+        'resolve_ip_addresses': True,
+        'use_sudo': True,
     }
 
     config['ssh'] = {
@@ -197,6 +198,10 @@ def load_config(args, config_file):
         if value is not None
     }})
 
+    if evaluate_boolean(config['kubernetes']['enabled']) and evaluate_boolean(config['cassandra']['use_sudo']):
+        logging.warning('Forcing setting use_sudo of [cassandra] section to False because Kubernetes mode is enabled')
+        config['cassandra']['use_sudo'] = 'False'
+
     resolve_ip_addresses = evaluate_boolean(config['cassandra']['resolve_ip_addresses'])
     config.set('cassandra', 'resolve_ip_addresses', 'True' if resolve_ip_addresses else 'False')
     if config['storage']['fqdn'] == socket.getfqdn() and not resolve_ip_addresses:
@@ -234,6 +239,7 @@ def load_config(args, config_file):
             logging.error('Required configuration "{}" is missing in [ssh] section.'.format(field))
             sys.exit(2)
 
+    logging.debug("Using Medusa config {}".format(medusa_config))
     return medusa_config
 
 
