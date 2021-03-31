@@ -349,11 +349,13 @@ class RestoreJob(object):
         verify_option = '--no-verify'
 
         # %s placeholders in the below command will get replaced by pssh using per host command substitution
-        command = 'mkdir -p {work}; cd {work} && medusa-wrapper {sudo} medusa --fqdn=%s -vvv restore-node ' \
+        command = 'mkdir -p {work}; cd {work} && medusa-wrapper {sudo} medusa --config-file {config_file} ' \
+                  '--fqdn=%s -vvv restore-node ' \
                   '{in_place} {keep_auth} %s {verify} --backup-name {backup} --temp-dir {temp_dir} ' \
                   '{use_sstableloader} {keyspaces} {tables}' \
             .format(work=self.work_dir,
                     sudo='sudo' if medusa.utils.evaluate_boolean(self.config.cassandra.use_sudo) else '',
+                    config_file=self.config.file_path,
                     in_place=in_place_option,
                     keep_auth=keep_auth_option,
                     verify=verify_option,
