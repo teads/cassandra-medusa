@@ -57,7 +57,10 @@ MonitoringConfig = collections.namedtuple(
 
 MedusaConfig = collections.namedtuple(
     'MedusaConfig',
-    ['storage', 'cassandra', 'ssh', 'checks', 'monitoring', 'logging', 'grpc', 'kubernetes']
+    [
+        'file_path',  # Store the config file path
+        'storage', 'cassandra', 'ssh', 'checks', 'monitoring', 'logging', 'grpc', 'kubernetes'
+    ]
 )
 
 LoggingConfig = collections.namedtuple(
@@ -215,6 +218,7 @@ def load_config(args, config_file):
         config['cassandra']['cql_password'] = os.environ["CQL_PASSWORD"]
 
     medusa_config = MedusaConfig(
+        file_path=config_file,
         storage=_namedtuple_from_dict(StorageConfig, config['storage']),
         cassandra=_namedtuple_from_dict(CassandraConfig, config['cassandra']),
         ssh=_namedtuple_from_dict(SSHConfig, config['ssh']),
