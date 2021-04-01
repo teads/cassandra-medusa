@@ -88,7 +88,6 @@ def restore_node_locally(config, temp_dir, backup_name, in_place, keep_auth, see
     download_data(config.storage, node_backup, fqtns_to_restore, destination=download_dir)
 
     if not medusa.utils.evaluate_boolean(config.kubernetes.enabled):
-        logging.info('Stopping Cassandra')
         cassandra.shutdown()
         wait_for_node_to_go_down(config, cassandra.hostname)
 
@@ -345,9 +344,10 @@ def get_node_tokens(node_fqdn, token_map_file):
 
 def wait_for_seeds(config, seeds):
     seed_list = seeds.split(',')
+    logging.info(f'Checking if at least one of the following seeds is up: {seed_list}')
     attempts = 0
     while not any([is_node_up(config, s) for s in seed_list]):
-        logging.info('No seeds are up yet, will wait a minute')
+        logging.info(f'No seeds are up yet, will wait a minute ({attempts}/{MAX_ATTEMPTS})')
         attempts += 1
         time.sleep(A_MINUTE)
         if attempts > MAX_ATTEMPTS:
