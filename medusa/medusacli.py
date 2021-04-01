@@ -68,8 +68,8 @@ def configure_file_logging(config):
 
 
 def configure_console_logging(verbosity, without_log_timestamp):
-    logger = logging.getLogger('')
-    logger.setLevel(logging.DEBUG)  # handlers filter the level
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.DEBUG)  # handlers filter the level
 
     loglevel = max(2 - verbosity, 0) * 10
 
@@ -86,8 +86,8 @@ def configure_console_logging(verbosity, without_log_timestamp):
     console_handler.setLevel(loglevel)
     console_handler.setFormatter(log_format)
 
-    logger.addHandler(console_handler)
-    if loglevel >= logging.DEBUG:
+    root_logger.addHandler(console_handler)
+    if loglevel > logging.DEBUG:
         # Disable debugging logging for external libraries
         for loggername in 'urllib3', 'google_cloud_storage.auth.transport.requests', 'paramiko', 'cassandra':
             logging.getLogger(loggername).setLevel(logging.CRITICAL)
