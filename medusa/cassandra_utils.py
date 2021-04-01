@@ -25,7 +25,7 @@ import socket
 import subprocess
 import time
 import yaml
-from medusa.utils import null_if_empty
+
 
 from subprocess import PIPE
 from retrying import retry
@@ -34,9 +34,12 @@ from cassandra.cluster import Cluster, ExecutionProfile
 from cassandra.policies import WhiteListRoundRobinPolicy
 from cassandra.auth import PlainTextAuthProvider
 from ssl import SSLContext, PROTOCOL_TLS, CERT_REQUIRED
+from typing import Type
+
 from medusa.network.hostname_resolver import HostnameResolver
 from medusa.service.snapshot import SnapshotService
 from medusa.nodetool import Nodetool
+from medusa.utils import null_if_empty
 
 
 class SnapshotPath(object):
@@ -487,12 +490,12 @@ class Cassandra(object):
                 for row in session.schema_path_mapping()
             }
 
-    def shutdown(self):
+    def shutdown(self) -> None:
+        logging.info('Stopping Cassandra')
         try:
             subprocess.check_output(self._stop_cmd)
-        except subprocess.CalledProcessError:
-            logging.debug('Cassandra is already down on {}'.format(self._hostname))
-            return
+        except subprocess.CalledProcessError as e:
+            logging.debug(f'Cassandra may be already down on {self._hostname} ({e})')
 
     def start_with_implicit_token(self):
         cmd = self._start_cmd
@@ -546,25 +549,34 @@ def wait_for_node_to_come_up(config, host):
 
 
 @retry(stop_max_attempt_number=7, wait_exponential_multiplier=5000, wait_exponential_max=120000)
-def wait_for_node_to_go_down(config, host):
-    logging.info('Waiting for Cassandra to go down on {}'.format(host))
+def wait_for_node_to_go_down(config: Type['MedusaConfig'], host: str) -> bool:
+    """Ensure that Cassandra no longer listen on specific TCP port(s)
+
+    Args:
+        config: Medusa configuration that specifies which TCP ports must be checked
+        host: Cassandra node to check
+
+    Returns: True if Cassandra is stopped on `host`. Returning a value is mandatory to stop the retry process.
+    """
+    logging.info(f'Waiting for Cassandra to go down on {host}')
 
     if is_node_up(config, host):
         # TODO can do a kill here
         raise CassandraNodeNotDownError(host)
-    else:
-        logging.info('Cassandra is down {}'.format(host))
-        return True
+    logging.info(f'Cassandra {host} is down')
+    return True
 
 
 def is_node_up(config, host):
-    """
-    Calls nodetool statusbinary, nodetool statusthrift or both. This function checks the output returned from nodetool
-    and not the return code. There could be a normal return code of zero when the node is an unhealthy state and not
-    accepting requests.
+    """Ensure a Cassandra node is up by checking that a specific port is open
 
-    :param health_check: Supported values are cql, thrift, and all. The latter will perform both checks. Defaults to
-    cql.
+    In CCM mode: calls nodetool statusbinary, nodetool statusthrift or both. This function checks the output returned
+    from nodetool and not the return code. There could be a normal return code of zero when the node is an unhealthy
+    state and not accepting requests.
+
+    :param config: Configuration holding health_check setting (in [checks] section)
+        Supported values are cql, thrift, and all. The latter will perform both checks. Defaults to cql.
+        TCP port values are determined using cassandra.yaml file
     :param host: The target host on which to perform the check
     :return: True if the node is accepting requests, False otherwise. If both cql and thrift are checked, then the node
     must be ready to accept requests for both in order for the health check to be successful.
@@ -581,8 +593,8 @@ def is_node_up(config, host):
             return is_ccm_up(args, 'statusbinary')
     else:
         cassandra = Cassandra(config)
-        native_port = cassandra.native_port
-        rpc_port = cassandra.rpc_port
+        native_port = int(cassandra.native_port)
+        rpc_port = int(cassandra.rpc_port)
         if health_check == 'thrift':
             return is_cassandra_up(host, rpc_port)
         elif health_check == 'all':
@@ -609,29 +621,35 @@ def is_ccm_up(args, nodetool_command):
         return False
 
 
-def is_open(host, port):
-    timeout = 3
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.settimeout(timeout)
-    is_accessible = False
-    try:
-        s.connect((host, port))
-        s.shutdown(socket.SHUT_RDWR)
-        is_accessible = True
-    except socket.error as e:
-        logging.debug('Port {} close on host {}'.format(port, host), exc_info=e)
-        is_accessible = False
-    finally:
-        s.close()
-        return is_accessible
+def is_open(host: str, port: int) -> bool:
+    timeout: float = 3.0
+    is_accessible: bool = False
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.settimeout(timeout)
+        try:
+            logging.debug(f'Connecting to {host}:{port}')
+            s.connect((host, port))
+            logging.debug(f'Connected!')
+            s.shutdown(socket.SHUT_RDWR)
+            is_accessible = True
+        except ConnectionRefusedError as e:
+            logging.debug(f'Port {port} is closed on host {host} ({e})')
+        except Exception:
+            logging.exception(f"Can't check if TCP port {port} is open on host {host}")
+    return is_accessible
 
 
 @retry(stop_max_attempt_number=5, wait_exponential_multiplier=5000, wait_exponential_max=120000)
-def is_cassandra_up(host, port):
-    if is_open(host, port):
-        return True
-    else:
-        logging.debug('The node {} is not up yet...'.format(host))
+def is_cassandra_up(host: str, port: int) -> bool:
+    """Check that a Cassandra host is listening on a given tcp port
+
+    Used to ensure that a node is up and running but also to make sure it's down (e.g. prerequisite to restore data)
+    """
+    is_up = is_open(host, port)
+    human_desc = 'open' if is_up else 'closed'
+    logging.debug(f'TCP port {port} on host {host} is {human_desc}')
+    return is_up
 
 
 class CassandraNodeNotUpError(Exception):
@@ -644,7 +662,7 @@ class CassandraNodeNotUpError(Exception):
         attempts -- the number of times the check was performed
     """
 
-    def __init(self, host):
+    def __init__(self, host):
         msg = 'Cassandra node {} is still down...'.format(host)
         super(CassandraNodeNotUpError, self).__init__(msg)
 
@@ -654,6 +672,6 @@ class CassandraNodeNotDownError(Exception):
     Raised when we give up waiting on a node to go down, meaning nodetool statusbinary and/or statusthrift keep
     reporting open ports.
     """
-    def __init(self, host):
+    def __init__(self, host):
         msg = 'Cassandra node {} is still up...'.format(host)
         super(CassandraNodeNotDownError, self).__init__(msg)
