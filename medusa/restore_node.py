@@ -217,9 +217,14 @@ def invoke_sstableloader(config, download_dir, keep_auth, fqtns_to_restore, stor
                         sstableloader_args.append("-kspw")
                         sstableloader_args.append(config.cassandra.sstableloader_kspw)
 
-                    output = subprocess.check_output(sstableloader_args)
-                    for line in output.decode('utf-8').split('\n'):
-                        logging.debug(line)
+                    try:
+                        output = subprocess.check_output(sstableloader_args, stderr=subprocess.STDOUT)
+                        medusa.utils.log_bytes(output, logging.debug)
+                    except subprocess.CalledProcessError as e:
+                        logging.error("Error while running sstableloader")
+                        medusa.utils.log_bytes(e.output, logging.error)
+                        logging.debug(f"Environment variables: {os.environ}")
+                        raise
 
 
 def keyspace_is_allowed_to_restore(keyspace, keep_auth, fqtns_to_restore):

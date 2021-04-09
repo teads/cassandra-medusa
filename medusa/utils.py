@@ -45,3 +45,9 @@ def null_if_empty(value):
     if (str(value) == ''):
         return None
     return value
+
+
+def log_bytes(message, log_fn=logging.info):
+    for line in message.decode('utf-8').split('\n'):
+        if line:
+            log_fn(line)
