@@ -120,7 +120,7 @@ def load_config(args, config_file):
         'username': os.environ.get('USER') or '',
         'key_file': '',
         'port': 22,
-        'cert_file'
+        'cert_file': ''
     }
 
     config['checks'] = {
