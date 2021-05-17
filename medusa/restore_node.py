@@ -132,6 +132,9 @@ def restore_node_locally(config, temp_dir, backup_name, in_place, keep_auth, see
             cassandra.start_with_implicit_token()
         else:
             cassandra.start(tokens)
+    elif not in_place:
+        # Kubernetes will manage the lifecycle, but we still need to modify the tokens
+        cassandra.replaceTokensInCassandraYamlAndDisableBootstrap(tokens)
 
     # Clean the restored data from local temporary folder
     clean_path(download_dir, use_sudo, keep_folder=False)
@@ -201,7 +204,7 @@ def invoke_sstableloader(config, download_dir, keep_auth, fqtns_to_restore, stor
                                           os.path.join(ks_path, table)]
                     if storage_port != "7000":
                         sstableloader_args.append("--storage-port")
-                        sstableloader_args.append(storage_port)
+                        sstableloader_args.append(str(storage_port))
                     if config.cassandra.sstableloader_ts is not None and \
                        config.cassandra.sstableloader_tspw is not None and \
                        config.cassandra.sstableloader_ks is not None and \
@@ -333,7 +336,7 @@ def get_node_tokens(node_fqdn, token_map_file):
     token = token_map[node_fqdn]['tokens']
 
     # if vnodes, then the tokens come as an iterable
-    if isinstance(token, collections.Iterable):
+    if isinstance(token, collections.abc.Iterable):
         return list(map(str, token))
     # if there is only a single token, the token might show up as one integer
     else:

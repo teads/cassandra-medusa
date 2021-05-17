@@ -29,11 +29,10 @@ from medusa.utils import null_if_empty
 
 from subprocess import PIPE
 from retrying import retry
-from cassandra import ProtocolVersion
 from cassandra.cluster import Cluster, ExecutionProfile
 from cassandra.policies import WhiteListRoundRobinPolicy
 from cassandra.auth import PlainTextAuthProvider
-from ssl import SSLContext, PROTOCOL_TLS, CERT_REQUIRED
+from ssl import SSLContext, PROTOCOL_TLSv1_2, CERT_REQUIRED
 from medusa.network.hostname_resolver import HostnameResolver
 from medusa.service.snapshot import SnapshotService
 from medusa.nodetool import Nodetool
@@ -65,7 +64,7 @@ class CqlSessionProvider(object):
             self._auth_provider = auth_provider
 
         if cassandra_config.certfile is not None:
-            ssl_context = SSLContext(PROTOCOL_TLS)
+            ssl_context = SSLContext(PROTOCOL_TLSv1_2)
             ssl_context.load_verify_locations(cassandra_config.certfile)
             ssl_context.verify_mode = CERT_REQUIRED
             if cassandra_config.usercert is not None and cassandra_config.userkey is not None:
@@ -89,8 +88,7 @@ class CqlSessionProvider(object):
         cluster = Cluster(contact_points=self._ip_addresses,
                           auth_provider=self._auth_provider,
                           execution_profiles=self._execution_profiles,
-                          ssl_context=self._ssl_context,
-                          protocol_version=ProtocolVersion.V4)
+                          ssl_context=self._ssl_context)
 
         if retry:
             max_retries = 5
@@ -155,7 +153,7 @@ class CqlSession(object):
             if host.address == listen_address or self.hostname_resolver.resolve_fqdn(host.address) == socket_host:
                 return host.datacenter
 
-        raise RuntimeError('Unable to current datacenter')
+        raise RuntimeError('Unable to get current datacenter')
 
     def tokenmap(self):
         token_map = self.cluster.metadata.token_map
@@ -340,15 +338,15 @@ class Cassandra(object):
 
     @property
     def storage_port(self):
-        return self._storage_port
+        return int(self._storage_port)
 
     @property
     def native_port(self):
-        return self._native_port
+        return int(self._native_port)
 
     @property
     def rpc_port(self):
-        return self._rpc_port
+        return int(self._rpc_port)
 
     class Snapshot(object):
         def __init__(self, parent, tag):
@@ -623,7 +621,7 @@ def is_open(host, port):
         is_accessible = False
     finally:
         s.close()
-        return is_accessible
+    return is_accessible
 
 
 @retry(stop_max_attempt_number=5, wait_exponential_multiplier=5000, wait_exponential_max=120000)
