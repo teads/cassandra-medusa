@@ -54,7 +54,7 @@ def restore_node(config, temp_dir, backup_name, in_place, keep_auth, seeds, veri
 
     if verify:
         hostname_resolver = HostnameResolver(medusa.config.evaluate_boolean(config.cassandra.resolve_ip_addresses))
-        verify_restore([hostname_resolver.resolve_fqdn()], config)
+        verify_restore([hostname_resolver.resolve_fqdn(socket.gethostbyname(socket.getfqdn()))], config)
 
 
 def restore_node_locally(config, temp_dir, backup_name, in_place, keep_auth, seeds, storage, keyspaces, tables):
@@ -195,7 +195,7 @@ def invoke_sstableloader(config, download_dir, keep_auth, fqtns_to_restore, stor
                     cql_username = 'foo' if config.cassandra.cql_username is None else config.cassandra.cql_username
                     cql_password = 'foo' if config.cassandra.cql_password is None else config.cassandra.cql_password
                     sstableloader_args = [config.cassandra.sstableloader_bin,
-                                          '-d', hostname_resolver.resolve_fqdn() if cassandra_is_ccm == 0
+                                          '-d', hostname_resolver.resolve_fqdn(socket.gethostbyname(socket.getfqdn())) if cassandra_is_ccm == 0
                                           else '127.0.0.1',
                                           '--conf-path', config.cassandra.config_file,
                                           '--username', cql_username,
