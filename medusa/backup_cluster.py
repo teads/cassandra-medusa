@@ -101,14 +101,14 @@ def orchestrate(config, backup_name, seed_target, stagger, enable_md5_checks, mo
 
 
 class BackupJob(object):
-    def __init__(self, config, backup_name, seed_target, stagger, enable_md5_checks, mode, temp_dir,
+    def __init__(self, config, backup_name_arg, seed_target, stagger, enable_md5_checks, mode, temp_dir,
                  parallel_snapshots, parallel_uploads):
         self.id = uuid.uuid4()
         # TODO expose the argument below (Note that min(1000, <number_of_hosts>) will be used)
         self.orchestration_snapshots = Orchestration(config, parallel_snapshots)
         self.orchestration_uploads = Orchestration(config, parallel_uploads)
         self.config = config
-        self.backup_name = backup_name
+        self.backup_name = backup_name_arg or datetime.datetime.now().strftime('%Y%m%d%H')
         self.stagger = stagger
         self.seed_target = seed_target
         self.enable_md5_checks = enable_md5_checks
