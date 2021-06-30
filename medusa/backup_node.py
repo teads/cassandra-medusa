@@ -158,7 +158,7 @@ def stagger(fqdn, storage, tokenmap):
 
 def main(config, backup_name_arg, stagger_time, enable_md5_checks_flag, mode):
     start = datetime.datetime.now()
-    backup_name = backup_name_arg or start.strftime('%Y%m%d%H')
+    backup_name = backup_name_arg or start.strftime('%Y%m%d%H%M')
     monitoring = Monitoring(config=config.monitoring)
 
     try:
@@ -226,6 +226,7 @@ def main(config, backup_name_arg, stagger_time, enable_md5_checks_flag, mode):
             "This error happened during the backup: {}".format(str(e)),
             config
         )
+
 
 # Wait 2^i * 10 seconds between each retry, up to 2 minutes between attempts, which is right after the
 # attempt on which it waited for 60 seconds

@@ -22,13 +22,15 @@ import socket
 import sys
 
 import medusa.cassandra_utils
+import medusa.storage
 from medusa.utils import evaluate_boolean
 
 StorageConfig = collections.namedtuple(
     'StorageConfig',
     ['bucket_name', 'key_file', 'prefix', 'fqdn', 'host_file_separator', 'storage_provider',
      'base_path', 'max_backup_age', 'max_backup_count', 'api_profile', 'transfer_max_bandwidth',
-     'concurrent_transfers', 'multi_part_upload_threshold', 'host', 'region', 'port', 'secure', 'aws_cli_path']
+     'concurrent_transfers', 'multi_part_upload_threshold', 'host', 'region', 'port', 'secure', 'aws_cli_path',
+     'backup_grace_period_in_days']
 )
 
 CassandraConfig = collections.namedtuple(
@@ -36,12 +38,12 @@ CassandraConfig = collections.namedtuple(
     ['start_cmd', 'stop_cmd', 'config_file', 'cql_username', 'cql_password', 'check_running', 'is_ccm',
      'sstableloader_bin', 'nodetool_username', 'nodetool_password', 'nodetool_password_file_path', 'nodetool_host',
      'nodetool_port', 'certfile', 'usercert', 'userkey', 'sstableloader_ts', 'sstableloader_tspw',
-     'sstableloader_ks', 'sstableloader_kspw', 'nodetool_ssl', 'resolve_ip_addresses']
+     'sstableloader_ks', 'sstableloader_kspw', 'nodetool_ssl', 'resolve_ip_addresses', 'use_sudo']
 )
 
 SSHConfig = collections.namedtuple(
     'SSHConfig',
-    ['username', 'key_file', 'port']
+    ['username', 'key_file', 'port', 'cert_file']
 )
 
 ChecksConfig = collections.namedtuple(
@@ -56,7 +58,10 @@ MonitoringConfig = collections.namedtuple(
 
 MedusaConfig = collections.namedtuple(
     'MedusaConfig',
-    ['storage', 'cassandra', 'ssh', 'checks', 'monitoring', 'logging', 'grpc', 'kubernetes']
+    [
+        'file_path',  # Store a specific config file path, None for default file
+        'storage', 'cassandra', 'ssh', 'checks', 'monitoring', 'logging', 'grpc', 'kubernetes'
+    ]
 )
 
 LoggingConfig = collections.namedtuple(
@@ -88,16 +93,12 @@ CONFIG_SECTIONS = {
 DEFAULT_CONFIGURATION_PATH = pathlib.Path('/etc/medusa/medusa.ini')
 
 
-def load_config(args, config_file):
-    """Load configuration from a medusa.ini file
+def _build_default_config():
+    """Build a INI config parser with default values
 
-    :param args: settings override. Higher priority than settings defined in medusa.ini
-    :param config_file: path to a medusa.ini file
-    :return: Medusa configuration
+    :return ConfigParser: default configuration
     """
     config = configparser.ConfigParser(interpolation=None)
-
-    # Set defaults
 
     config['storage'] = {
         'host_file_separator': ',',
@@ -111,6 +112,7 @@ def load_config(args, config_file):
         'aws_cli_path': 'aws',
         'fqdn': socket.getfqdn(),
         'region': 'default',
+        'backup_grace_period_in_days': 10,
     }
 
     config['logging'] = {
@@ -129,13 +131,15 @@ def load_config(args, config_file):
         'check_running': 'nodetool version',
         'is_ccm': '0',
         'sstableloader_bin': 'sstableloader',
-        'resolve_ip_addresses': 'True'
+        'resolve_ip_addresses': 'True',
+        'use_sudo': 'True',
     }
 
     config['ssh'] = {
         'username': os.environ.get('USER') or '',
         'key_file': '',
-        'port': '22'
+        'port': '22',
+        'cert_file': ''
     }
 
     config['checks'] = {
@@ -159,18 +163,28 @@ def load_config(args, config_file):
         'cassandra_url': 'None',
         'use_mgmt_api': 'False'
     }
+    return config
 
-    if config_file:
-        logging.debug('Loading configuration from {}'.format(config_file))
-        config.read_file(config_file.open())
-    elif DEFAULT_CONFIGURATION_PATH.exists():
-        logging.debug('Loading configuration from {}'.format(DEFAULT_CONFIGURATION_PATH))
-        config.read_file(DEFAULT_CONFIGURATION_PATH.open())
-    else:
+
+def parse_config(args, config_file):
+    """Parse a medusa.ini file and allow to override settings from command line
+
+    :param dict args: settings override. Higher priority than settings defined in medusa.ini
+    :param pathlib.Path config_file: path to medusa.ini file
+    :return: None
+    """
+    config = _build_default_config()
+
+    if config_file is None and not DEFAULT_CONFIGURATION_PATH.exists():
         logging.error(
             'No configuration file provided via CLI, nor no default file found in {}'.format(DEFAULT_CONFIGURATION_PATH)
         )
         sys.exit(1)
+
+    actual_config_file = DEFAULT_CONFIGURATION_PATH if config_file is None else config_file
+    logging.debug('Loading configuration from {}'.format(actual_config_file))
+    with actual_config_file.open() as f:
+        config.read_file(f)
 
     # Override config file settings with command line options
     for config_section in config.keys():
@@ -184,6 +198,11 @@ def load_config(args, config_file):
             if value is not None
         }})
 
+    if evaluate_boolean(config['kubernetes']['enabled']):
+        if evaluate_boolean(config['cassandra']['use_sudo']):
+            logging.warning('Forcing use_sudo to False because Kubernetes mode is enabled')
+        config['cassandra']['use_sudo'] = 'False'
+
     resolve_ip_addresses = evaluate_boolean(config['cassandra']['resolve_ip_addresses'])
     config.set('cassandra', 'resolve_ip_addresses', 'True' if resolve_ip_addresses else 'False')
     if config['storage']['fqdn'] == socket.getfqdn() and not resolve_ip_addresses:
@@ -195,7 +214,20 @@ def load_config(args, config_file):
     if "CQL_PASSWORD" in os.environ:
         config['cassandra']['cql_password'] = os.environ["CQL_PASSWORD"]
 
+    return config
+
+
+def load_config(args, config_file):
+    """Load configuration from a medusa.ini file
+
+    :param dict args: settings override. Higher priority than settings defined in medusa.ini
+    :param pathlib.Path config_file: path to a medusa.ini file or None if default path should be used
+    :return MedusaConfig: Medusa configuration
+    """
+    config = parse_config(args, config_file)
+
     medusa_config = MedusaConfig(
+        file_path=config_file,
         storage=_namedtuple_from_dict(StorageConfig, config['storage']),
         cassandra=_namedtuple_from_dict(CassandraConfig, config['cassandra']),
         ssh=_namedtuple_from_dict(SSHConfig, config['ssh']),
