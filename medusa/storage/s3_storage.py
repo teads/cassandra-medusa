@@ -25,16 +25,23 @@ from medusa.storage.s3_base_storage import S3BaseStorage
 
 
 class S3Storage(S3BaseStorage):
+    def __init__(self, config):
+        super().__init__(config)
+        imds_token = requests.put("http://169.254.169.254/latest/api/token",
+                                  headers={"X-aws-ec2-metadata-token-ttl-seconds": "21600"})
+        self.imds_headers = None if imds_token.status_code != 200 else {
+            "X-aws-ec2-metadata-token": imds_token.text}
+
     def get_aws_instance_profile(self):
         """
         Get IAM Role from EC2
         """
         logging.debug('Getting IAM Role:')
         try:
-            aws_instance_profile = requests.get('http://169.254.169.254/latest/meta-data/iam/security-credentials',
-                                                timeout=10)
+            aws_instance_profile = requests.get("http://169.254.169.254/latest/meta-data/iam/security-credentials",
+                                                timeout=10, headers=self.imds_headers)
         except requests.exceptions.RequestException:
-            logging.warn('Can\'t fetch IAM Role.')
+            logging.warn("Can't fetch IAM Role.")
             return None
 
         if aws_instance_profile.status_code != 200:
@@ -49,7 +56,7 @@ class S3Storage(S3BaseStorage):
 
         :return driver: EC2 driver object
         """
-        aws_security_token = ''
+        aws_session_token = ''
         aws_access_key_id = None
         # or authentication via AWS credentials file
         if self.config.key_file and os.path.exists(os.path.expanduser(self.config.key_file)):
@@ -64,6 +71,8 @@ class S3Storage(S3BaseStorage):
                 profile = aws_config[aws_profile]
                 aws_access_key_id = profile['aws_access_key_id']
                 aws_secret_access_key = profile['aws_secret_access_key']
+                if 'aws_session_token' in profile:
+                    aws_session_token = profile['aws_session_token']
         # Authentication via environment variables
         elif 'AWS_ACCESS_KEY_ID' in os.environ and \
                 'AWS_SECRET_ACCESS_KEY' in os.environ:
@@ -72,8 +81,11 @@ class S3Storage(S3BaseStorage):
             aws_secret_access_key = os.environ['AWS_SECRET_ACCESS_KEY']
 
             # Access token for credentials fetched from STS service:
-            if 'AWS_SECURITY_TOKEN' in os.environ:
-                aws_security_token = os.environ['AWS_SECURITY_TOKEN']
+            # AWS_SECURITY_TOKEN has been renamed AWS_SESSION_TOKEN so we need to support both
+            if 'AWS_SESSION_TOKEN' in os.environ:
+                aws_session_token = os.environ['AWS_SESSION_TOKEN']
+            elif 'AWS_SECURITY_TOKEN' in os.environ:
+                aws_session_token = os.environ['AWS_SECURITY_TOKEN']
 
         # or authentication via IAM Role credentials
         else:
@@ -82,14 +94,14 @@ class S3Storage(S3BaseStorage):
                 logging.debug('Reading AWS credentials from IAM Role: %s', aws_instance_profile.text)
                 url = "http://169.254.169.254/latest/meta-data/iam/security-credentials/" + aws_instance_profile.text
                 try:
-                    auth_data = requests.get(url).json()
+                    auth_data = requests.get(url, headers=self.imds_headers).json()
                 except requests.exceptions.RequestException:
                     logging.error('Can\'t fetch AWS IAM Role credentials.')
                     sys.exit(1)
 
                 aws_access_key_id = auth_data['AccessKeyId']
                 aws_secret_access_key = auth_data['SecretAccessKey']
-                aws_security_token = auth_data['Token']
+                aws_session_token = auth_data['Token']
 
         if aws_access_key_id is None:
             raise NotImplementedError("No valid method of AWS authentication provided.")
@@ -99,7 +111,7 @@ class S3Storage(S3BaseStorage):
         if self.config.storage_provider != Provider.S3:
             region = get_driver(self.config.storage_provider).region_name
         driver = cls(
-            aws_access_key_id, aws_secret_access_key, token=aws_security_token, region=region
+            aws_access_key_id, aws_secret_access_key, token=aws_session_token, region=region
         )
 
         if self.config.transfer_max_bandwidth is not None:

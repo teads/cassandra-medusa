@@ -147,8 +147,8 @@ class CqlSession(object):
                 return token.value
         raise RuntimeError('Unable to get current token')
 
-    def datacenter(self):
-        logging.debug('Checking datacenter...')
+    def placement(self):
+        logging.debug('Checking placement using dc and rack...')
         listen_address = socket.gethostbyname(self.cluster.contact_points[0])
         token_map = self.cluster.metadata.token_map
 
@@ -156,13 +156,13 @@ class CqlSession(object):
             socket_host = self.hostname_resolver.resolve_fqdn(listen_address)
             logging.debug('Checking host {} against {}/{}'.format(host.address, listen_address, socket_host))
             if host.address == listen_address or self.hostname_resolver.resolve_fqdn(host.address) == socket_host:
-                return host.datacenter
+                return host.datacenter, host.rack
 
-        raise RuntimeError('Unable to get current datacenter')
+        raise RuntimeError('Unable to get current placement')
 
     def tokenmap(self):
         token_map = self.cluster.metadata.token_map
-        datacenter = self.datacenter()
+        dc_rack_pair = self.placement()
 
         def get_host(host_token_pair):
             return host_token_pair[0]
@@ -183,10 +183,12 @@ class CqlSession(object):
         return {
             self.hostname_resolver.resolve_fqdn(host.address): {
                 'tokens': tokens,
-                'is_up': host.is_up
+                'is_up': host.is_up,
+                'rack': host.rack,
+                'dc': host.datacenter
             }
             for host, tokens in host_tokens_pairs
-            if host.datacenter == datacenter
+            if host.datacenter == dc_rack_pair[0]
         }
 
     def dump_schema(self):
@@ -707,8 +709,14 @@ def is_open(host, port):
         s.connect((host, port))
         s.shutdown(socket.SHUT_RDWR)
         is_accessible = True
+
+    # If cassandra is not running but the host is up, host may choose to silently drop inbound connections to the
+    #   closed port or may respond with a RST indicating that the connection was refused.
+    # ConnectionRefusedError: [Errno 111] Connection refused
+    except ConnectionRefusedError as cre:
+        logging.error("Host '{host}' is up, but port '{port}' is closed.".format(host=host, port=port), exc_info=cre)
     except socket.error as e:
-        logging.error('Port {} closed on host {}'.format(port, host), exc_info=e)
+        logging.error("Could not open socket to port '{port}' on '{host}'.".format(host=host, port=port), exc_info=e)
     finally:
         try:
             if s:

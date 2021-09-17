@@ -42,7 +42,7 @@ setuptools.setup(
     packages=setuptools.find_packages(),
     install_requires=[
         'python-dateutil<2.8.1,>=2.1',
-        'Click>=6.7',
+        'Click>=8.0.1',
         'click-aliases>=1.0.1',
         'PyYAML>=5.1',
         'cassandra-driver>=3.25.0',
@@ -68,7 +68,7 @@ setuptools.setup(
     extras_require={
         'S3': ["awscli>=1.16.291"],
         'GCS': ["google-cloud-storage>=1.7.0"],
-        'AZURE': ["azure-cli>=2.13.0"]
+        'AZURE': ["azure-cli>=2.24.0"]
     },
     entry_points={
         'console_scripts': [
